@@ -1,7 +1,4 @@
 using AutoMapper;
-using Identity.Infrastructure.Models;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
 using MyLifeApp.Application.Dtos.Requests.Post;
 using MyLifeApp.Application.Dtos.Responses;
 using MyLifeApp.Application.Dtos.Responses.Post;
@@ -9,30 +6,26 @@ using MyLifeApp.Application.Dtos.Responses.Profile;
 using MyLifeApp.Application.Interfaces.Repositories;
 using MyLifeApp.Application.Interfaces.Services;
 using MyLifeApp.Domain.Entities;
-using System.Security.Claims;
 using Profile = MyLifeApp.Domain.Entities.Profile;
 
 namespace MyLifeApp.Application.Services
 {
     public class PostService : IPostService
     {
-        public readonly IPostRepository _postRepository;
-        public readonly IProfileRepository _profileRepository;
-        public readonly IMapper _mapper;
-        public readonly IHttpContextAccessor _httpContext;
-        public readonly UserManager<User> _userManager;
+        private readonly IPostRepository _postRepository;
+        private readonly IPostCommentRepository _postCommentRepository;
+        private readonly IMapper _mapper;
+        private readonly IAuthenticatedProfileService _authenticatedProfileService;
 
         public PostService(IPostRepository postRepository,
-                           IProfileRepository profileRepository,
+                           IPostCommentRepository postCommentRepository,
                            IMapper mapper,
-                           IHttpContextAccessor httpContext,
-                           UserManager<User> userManager)
+                           IAuthenticatedProfileService authenticatedProfileService)
         {
             _postRepository = postRepository;
-            _profileRepository = profileRepository;
+            _postCommentRepository = postCommentRepository;
             _mapper = mapper;
-            _httpContext = httpContext;
-            _userManager = userManager;
+            _authenticatedProfileService = authenticatedProfileService;
         }
 
         public async Task<GetAllPostsResponse> GetPublicPostsAsync()
@@ -49,7 +42,8 @@ namespace MyLifeApp.Application.Services
             };
         }
 
-        public async Task<DetailPostResponse> GetPostByIdAsync(Guid postId)
+        // TODO => add validation for private posts only for posts owners
+        public async Task<DetailPostResponse> GetPostByIdAsync(string postId)
         {
             if (!await _postRepository.PostExistsAsync(postId))
             {
@@ -62,30 +56,25 @@ namespace MyLifeApp.Application.Services
             }
 
             Post post = await _postRepository.GetPostDetailsAsync(postId);
+            ICollection<PostComment> postComments = await _postCommentRepository.GetAllCommentsFromPost(post.Id);
             Profile profile = post.Profile;
 
             GetPostsResponse postMapper = _mapper.Map<GetPostsResponse>(post);
             GetProfileResponse profileMapper = _mapper.Map<GetProfileResponse>(profile);
+            ICollection<GetPostCommentsDTO> commentsMapper = _mapper.Map<ICollection<GetPostCommentsDTO>>(postComments);
 
+            // ToDo => verify how to change Comments Author profile name in json response
             return new DetailPostResponse()
             {
                 Title = post.Title,
                 Description = post.Description,
                 Profile = profileMapper,
+                Likes = post.PostLikes.Count,
+                Comments = commentsMapper,
                 Message = "Success",
                 IsSuccess = true,
                 StatusCode = 200
             };
-        }
-
-        private async Task<Profile> GetAuthenticatedProfileAsync()
-        {
-            ClaimsPrincipal userClaims = _httpContext.HttpContext!.User;
-            User? authenticatedUser = await _userManager.GetUserAsync(userClaims);
-            ICollection<Profile> profiles = await _profileRepository.GetAllAsync();
-            Profile authenticatedProfile = profiles.First(p => p.UserId == authenticatedUser!.Id);
-
-            return authenticatedProfile;
         }
 
         private static bool IsPostCreator(Post post, Profile profile)
@@ -95,7 +84,7 @@ namespace MyLifeApp.Application.Services
 
         public async Task<BaseResponse> CreatePostAsync(CreatePostRequest request)
         {
-            Profile authenticatedProfile = await GetAuthenticatedProfileAsync();
+            Profile authenticatedProfile = await _authenticatedProfileService.GetAuthenticatedProfile();
 
             Post post = _mapper.Map<Post>(request);
             post.Profile = authenticatedProfile;
@@ -116,7 +105,7 @@ namespace MyLifeApp.Application.Services
             };
         }
 
-        public async Task<BaseResponse> UpdatePostAsync(Guid postId, UpdatePostRequest request)
+        public async Task<BaseResponse> UpdatePostAsync(string postId, UpdatePostRequest request)
         {
             if (!await _postRepository.PostExistsAsync(postId))
             {
@@ -129,7 +118,7 @@ namespace MyLifeApp.Application.Services
             }
 
             Post postToUpdate = await _postRepository.GetByIdAsync(postId);
-            Profile authenticatedProfile = await GetAuthenticatedProfileAsync();
+            Profile authenticatedProfile = await _authenticatedProfileService.GetAuthenticatedProfile();
 
             if (!IsPostCreator(postToUpdate, authenticatedProfile))
             {
@@ -152,7 +141,7 @@ namespace MyLifeApp.Application.Services
             };
         }
 
-        public async Task<BaseResponse> DeletePostAsync(Guid postId)
+        public async Task<BaseResponse> DeletePostAsync(string postId)
         {
             if (!await _postRepository.PostExistsAsync(postId))
             {
@@ -165,7 +154,7 @@ namespace MyLifeApp.Application.Services
             }
 
             Post postToDelete = await _postRepository.GetByIdAsync(postId);
-            Profile authenticatedProfile = await GetAuthenticatedProfileAsync();
+            Profile authenticatedProfile = await _authenticatedProfileService.GetAuthenticatedProfile();
 
             if (!IsPostCreator(postToDelete, authenticatedProfile))
             {
@@ -186,12 +175,9 @@ namespace MyLifeApp.Application.Services
             };
         }
 
-        public async Task<BaseResponse> LikePostAsync(Guid postId)
+        public async Task<BaseResponse> LikePostAsync(string postId)
         {
-            Post post = await _postRepository.GetPostDetailsAsync(postId);
-            Profile authenticatedProfile = await GetAuthenticatedProfileAsync();
-
-            if (post == null)
+            if (!await _postRepository.PostExistsAsync(postId))
             {
                 return new BaseResponse()
                 {
@@ -201,15 +187,10 @@ namespace MyLifeApp.Application.Services
                 };
             }
 
-            PostLike like = new()
-            {
-                Profile = authenticatedProfile,
-                Post = post
-            };
+            Post post = await _postRepository.GetPostDetailsAsync(postId);
+            Profile authenticatedProfile = await _authenticatedProfileService.GetAuthenticatedProfile();
 
-            bool postAlreadyLiked = post.PostLikes.Any(p => p.Post == post && p.Profile == authenticatedProfile);
-
-            if (postAlreadyLiked)
+            if (await _postRepository.PostAlreadyLikedAsync(authenticatedProfile, post))
             {
                 return new BaseResponse()
                 {
@@ -219,7 +200,13 @@ namespace MyLifeApp.Application.Services
                 };
             }
 
-            await _postRepository.AddLikePostAsync(like);
+            PostLike like = new()
+            {
+                Profile = authenticatedProfile,
+                Post = post
+            };
+
+            await _postRepository.AddPostLikeAsync(like);
 
             return new BaseResponse()
             {
@@ -229,12 +216,9 @@ namespace MyLifeApp.Application.Services
             };
         }
 
-        public async Task<BaseResponse> UnlikePostAsync(Guid postId)
+        public async Task<BaseResponse> UnlikePostAsync(string postId)
         {
-            Post post = await _postRepository.GetPostDetailsAsync(postId);
-            Profile authenticatedProfile = await GetAuthenticatedProfileAsync();
-
-            if (post == null)
+            if (!await _postRepository.PostExistsAsync(postId))
             {
                 return new BaseResponse()
                 {
@@ -244,9 +228,12 @@ namespace MyLifeApp.Application.Services
                 };
             }
 
-            PostLike? postToUnlike = post.PostLikes.FirstOrDefault(p => p.Post == post && p.Profile == authenticatedProfile);
+            Post post = await _postRepository.GetPostDetailsAsync(postId);
+            Profile authenticatedProfile = await _authenticatedProfileService.GetAuthenticatedProfile();
 
-            if (postToUnlike == null)
+            PostLike? postToUnlike = await _postRepository.GetPostLikeAsync(authenticatedProfile, post);
+
+            if (!await _postRepository.PostAlreadyLikedAsync(authenticatedProfile, post))
             {
                 return new BaseResponse()
                 {
@@ -256,7 +243,7 @@ namespace MyLifeApp.Application.Services
                 };
             }
 
-            await _postRepository.RemoveLikePostAsync(postToUnlike);
+            await _postRepository.RemovePostLikeAsync(postToUnlike);
 
             return new BaseResponse()
             {
@@ -266,19 +253,105 @@ namespace MyLifeApp.Application.Services
             };
         }
 
-        public Task<BaseResponse> CommentPostAsync(Guid postId)
+        // ToDo => verify if post is private (as a bonus)
+        public async Task<BaseResponse> CommentPostAsync(string postId, CommentPostRequest request)
         {
-            throw new NotImplementedException();
+            if (!await _postRepository.PostExistsAsync(postId))
+            {
+                return new BaseResponse()
+                {
+                    Message = "Post not found",
+                    IsSuccess = false,
+                    StatusCode = 404
+                };
+            }
+
+            Post post = await _postRepository.GetPostDetailsAsync(postId);
+            Profile profile = await _authenticatedProfileService.GetAuthenticatedProfile();
+
+            PostComment comment = _mapper.Map<PostComment>(request);
+            comment.Profile = profile;
+            comment.Post = post;
+            
+            await _postCommentRepository.CreateAsync(comment);
+
+            return new BaseResponse()
+            {
+                Message = "Comment successfuly added",
+                IsSuccess = true,
+                StatusCode = 201
+            };
         }
 
-        public Task<BaseResponse> UpdateCommentAsync(Guid postId)
+        public async Task<BaseResponse> UpdateCommentAsync(string commentId, CommentPostRequest request)
         {
-            throw new NotImplementedException();
+            if (!await _postCommentRepository.PostCommentExistsAsync(commentId))
+            {
+                return new BaseResponse()
+                {
+                    Message = "Comment not found",
+                    IsSuccess = false,
+                    StatusCode = 404
+                };
+            }
+
+            PostComment comment = await _postCommentRepository.GetByIdAsync(commentId);
+            Profile profile = await _authenticatedProfileService.GetAuthenticatedProfile();
+
+            if (profile != comment.Profile)
+            {
+                return new BaseResponse()
+                {
+                    Message = "Only comment author can update the comment",
+                    IsSuccess = false,
+                    StatusCode = 400
+                };
+            }
+
+            PostComment commentToUpdate = _mapper.Map(request, comment);
+            await _postCommentRepository.SaveAsync();
+
+            return new BaseResponse()
+            {
+                Message = "Comment successfuly updated",
+                IsSuccess = true,
+                StatusCode = 200
+            };
         }
 
-        public Task<BaseResponse> DeleteCommentAsync(Guid postId)
+        public async Task<BaseResponse> DeleteCommentAsync(string commentId)
         {
-            throw new NotImplementedException();
+            if (!await _postCommentRepository.PostCommentExistsAsync(commentId))
+            {
+                return new BaseResponse()
+                {
+                    Message = "Comment not found",
+                    IsSuccess = false,
+                    StatusCode = 404
+                };
+            }
+
+            PostComment comment = await _postCommentRepository.GetByIdAsync(commentId);
+            Profile profile = await _authenticatedProfileService.GetAuthenticatedProfile();
+
+            // Isco => Only Comment Author and Post Author can delete the comment
+            if (comment.Profile != profile && comment.Post.Profile != profile)
+            {
+                return new BaseResponse()
+                {
+                    Message = "Only Comment Author or Post Author can delete the comment",
+                    IsSuccess = false,
+                    StatusCode = 400
+                };
+            }
+
+            await _postCommentRepository.DeleteAsync(comment);
+
+            return new BaseResponse()
+            {
+                StatusCode = 204,
+                IsSuccess = true
+            };
         }
     }
 }

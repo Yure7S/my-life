@@ -1,12 +1,10 @@
-﻿using FakeItEasy;
-using Xunit;
-using FluentAssertions;
-using MyLifeApp.Application.Dtos.Requests.Post;
+﻿using MyLifeApp.Application.Dtos.Requests.Post;
 using MyLifeApp.Application.Dtos.Responses.Post;
 using MyLifeApp.Application.Dtos.Responses;
 using MyLifeApp.Application.Interfaces.Services;
 using MyLife.Api.Controllers;
 using MyLifeApp.Domain.Entities;
+using Profile = MyLifeApp.Domain.Entities.Profile;
 using Microsoft.AspNetCore.Mvc;
 using MyLifeApp.Application.Dtos.Responses.Profile;
 
@@ -64,7 +62,7 @@ namespace MyLifeApp.Api.Test.Controllers
                 IsSuccess = true
             };
 
-            A.CallTo(() => _postService.GetPostByIdAsync(A<Guid>.Ignored))
+            A.CallTo(() => _postService.GetPostByIdAsync(A<string>.Ignored))
                 .Returns(Task.FromResult(response));
 
             // Act
@@ -80,7 +78,7 @@ namespace MyLifeApp.Api.Test.Controllers
         public async Task GetPostById_InexistentPost_ReturnsNotFound()
         {
             // Arrange
-            var inexistentId = Guid.NewGuid();
+            var inexistentId = Guid.NewGuid().ToString();
 
             DetailPostResponse response = new()
             {
@@ -88,7 +86,7 @@ namespace MyLifeApp.Api.Test.Controllers
                 StatusCode = 404
             };
 
-            A.CallTo(() => _postService.GetPostByIdAsync(A<Guid>.Ignored))
+            A.CallTo(() => _postService.GetPostByIdAsync(A<string>.Ignored))
                 .Returns(Task.FromResult(response));
 
             // Act
@@ -191,7 +189,7 @@ namespace MyLifeApp.Api.Test.Controllers
         public async Task UpdatePost_InexistentPost_ReturnsBadRequest()
         {
             // Arrange
-            var inexistentId = Guid.NewGuid();
+            var inexistentId = Guid.NewGuid().ToString();
 
             UpdatePostRequest request = new()
             {
@@ -242,7 +240,7 @@ namespace MyLifeApp.Api.Test.Controllers
         public async Task DeletePost_InexistentPost_ReturnsNoContent()
         {
             // Arrange
-            var inexistentId = Guid.NewGuid();
+            var inexistentId = Guid.NewGuid().ToString();
 
             BaseResponse response = new()
             {
@@ -288,7 +286,7 @@ namespace MyLifeApp.Api.Test.Controllers
         public async Task LikePost_InexistentPost_ReturnsNotFound()
         {
             // Arrange
-            Guid inexistentPost = Guid.NewGuid();
+            string inexistentPost = Guid.NewGuid().ToString();
 
             BaseResponse response = new()
             {
@@ -359,7 +357,7 @@ namespace MyLifeApp.Api.Test.Controllers
         public async Task UnlikePost_InexistentPost_ReturnsNotFound()
         {
             // Arrange
-            Guid inexistentPost = Guid.NewGuid();
+            string inexistentPost = Guid.NewGuid().ToString();
 
             BaseResponse response = new()
             {
@@ -397,6 +395,214 @@ namespace MyLifeApp.Api.Test.Controllers
 
             // Act
             var result = await _controller.UnlikePost(post.Id);
+
+            // Assert
+            result.Should().BeOfType<ObjectResult>()
+                .Which.StatusCode.Should().Be(400);
+        }
+
+        [Fact]
+        public async Task CommentPost_ValidCommentAndPost_ReturnsCreated()
+        {
+            // Arrange
+            var post = A.Fake<Post>();
+
+            CommentPostRequest request = new()
+            {
+                Comment = "Nice post!"
+            };
+
+            BaseResponse response = new()
+            {
+                Message = "Comment successfuly added",
+                IsSuccess = true,
+                StatusCode = 201
+            };
+
+            A.CallTo(() => _postService.CommentPostAsync(post.Id, request)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.CommentPost(post.Id, request);
+
+            // Assert
+            result.Should().BeOfType<ObjectResult>()
+                .Which.StatusCode.Should().Be(201);
+        }
+
+        [Fact]
+        public async Task CommentPost_InexistentPost_ReturnsNotFound()
+        {
+            // Arrange
+            var post = A.Fake<Post>();
+
+            CommentPostRequest request = new()
+            {
+                Comment = "Nice post!"
+            };
+
+            BaseResponse response = new()
+            {
+                Message = "Post not found",
+                IsSuccess = false,
+                StatusCode = 404
+            };
+
+            A.CallTo(() => _postService.CommentPostAsync(post.Id, request)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.CommentPost(post.Id, request);
+
+            // Assert
+            result.Should().BeOfType<ObjectResult>()
+                .Which.StatusCode.Should().Be(404);
+        }
+
+        [Fact]
+        public async Task UpdateComment_ExistentAndValidComment_ReturnsSuccess()
+        {
+            // Arrange
+            var comment = A.Fake<PostComment>();
+
+            CommentPostRequest request = new()
+            {
+                Comment = "Nice post!"
+            };
+
+            BaseResponse response = new()
+            {
+                Message = "Comment successfuly updated",
+                IsSuccess = true,
+                StatusCode = 200
+            };
+
+            A.CallTo(() => _postService.UpdateCommentAsync(comment.Id, request)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.UpdateComment(comment.Id, request);
+
+            // Assert
+            result.Should().BeOfType<OkObjectResult>()
+                .Which.Value.Should().BeEquivalentTo(response);
+        }
+
+        [Fact]
+        public async Task UpdateComment_InexistentComment_ReturnsNotFound()
+        {
+            // Arrange
+            var comment = A.Fake<PostComment>();
+
+            CommentPostRequest request = new()
+            {
+                Comment = "Nice post!"
+            };
+
+            BaseResponse response = new()
+            {
+                Message = "Comment not found",
+                IsSuccess = false,
+                StatusCode = 404
+            };
+
+            A.CallTo(() => _postService.UpdateCommentAsync(comment.Id, request)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.UpdateComment(comment.Id, request);
+
+            // Assert
+            result.Should().BeOfType<ObjectResult>()
+                .Which.StatusCode.Should().Be(404);
+        }
+
+        [Fact]
+        public async Task UpdateComment_InvalidUpdate_ReturnsBadRequest()
+        {
+            // Arrange
+            var comment = A.Fake<PostComment>();
+
+            CommentPostRequest request = new()
+            {
+                Comment = "Nice post!"
+            };
+
+            BaseResponse response = new()
+            {
+                Message = "Only comment author can update the comment",
+                IsSuccess = false,
+                StatusCode = 400
+            };
+
+            A.CallTo(() => _postService.UpdateCommentAsync(comment.Id, request)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.UpdateComment(comment.Id, request);
+
+            // Assert
+            result.Should().BeOfType<ObjectResult>()
+                .Which.StatusCode.Should().Be(400);
+        }
+
+        [Fact]
+        public async Task DeleteComment_ValidComment_ReturnsOk()
+        {
+            // Arrange
+            var comment = A.Fake<PostComment>();
+
+            BaseResponse response = new()
+            {
+                IsSuccess = true,
+                StatusCode = 204
+            };
+
+            A.CallTo(() => _postService.DeleteCommentAsync(comment.Id)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.DeleteComment(comment.Id);
+
+            // Assert
+            result.Should().BeOfType<ObjectResult>()
+                .Which.StatusCode.Should().Be(204);
+        }
+
+        [Fact]
+        public async Task DeleteComment_InexistentComment_ReturnsNotFound()
+        {
+            // Arrange
+            var comment = A.Fake<PostComment>();
+
+            BaseResponse response = new()
+            {
+                Message = "Comment not found",
+                IsSuccess = false,
+                StatusCode = 404
+            };
+
+            A.CallTo(() => _postService.DeleteCommentAsync(comment.Id)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.DeleteComment(comment.Id);
+
+            // Assert
+            result.Should().BeOfType<ObjectResult>()
+                .Which.StatusCode.Should().Be(404);
+        }
+
+        [Fact]
+        public async Task DeleteComment_InvalidDelete_ReturnsBadRequest()
+        {
+            // Arrange
+            var comment = A.Fake<PostComment>();
+
+            BaseResponse response = new()
+            {
+                Message = "Only Comment Author or Post Author can delete the comment",
+                IsSuccess = false,
+                StatusCode = 400
+            };
+
+            A.CallTo(() => _postService.DeleteCommentAsync(comment.Id)).Returns(Task.FromResult(response));
+
+            // Act
+            var result = await _controller.DeleteComment(comment.Id);
 
             // Assert
             result.Should().BeOfType<ObjectResult>()

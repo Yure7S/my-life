@@ -1,6 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using MyLifeApp.Application.Dtos.Requests.Post;
-using MyLifeApp.Application.Dtos.Responses;
 using MyLifeApp.Application.Interfaces.Repositories;
 using MyLifeApp.Domain.Entities;
 using MyLifeApp.Infrastructure.Data.Context;
@@ -29,7 +27,7 @@ namespace MyLifeApp.Infrastructure.Data.Repositories
                                .ToListAsync();
         }
 
-        public async Task<Post> GetPostDetailsAsync(Guid postId)
+        public async Task<Post> GetPostDetailsAsync(string postId)
         {
             return await _posts.Where(p => p.Id == postId)
                                .Include(p => p.Profile)
@@ -39,29 +37,34 @@ namespace MyLifeApp.Infrastructure.Data.Repositories
                                .FirstAsync();
         }
 
-        public async Task<bool> PostExistsAsync(Guid postId)
+        public async Task<bool> PostExistsAsync(string postId)
         {
             return await _posts.AnyAsync(p => p.Id == postId);
         }
 
-        public async Task<PostComment> AddCommentPostAsync(PostComment comment)
+
+        // ToDo => create a repository for PostLike entity to avoid code redundance 
+        public async Task<PostLike> GetPostLikeAsync(Profile profile, Post post)
         {
-            await _postComments.AddAsync(comment);
-            await base.SaveAsync();
-            return comment;
+            return await _postLikes.FirstOrDefaultAsync(p => p.Profile == profile && p.Post == post);
         }
 
-        public async Task<PostLike> AddLikePostAsync(PostLike like)
+        public async Task<PostLike> AddPostLikeAsync(PostLike like)
         {
             await _postLikes.AddAsync(like);
             await base.SaveAsync();
             return like;
         }
-        
-        public async Task RemoveLikePostAsync(PostLike like)
+
+        public async Task RemovePostLikeAsync(PostLike like)
         {
             _postLikes.Remove(like);
             await base.SaveAsync();
+        }
+
+        public async Task<bool> PostAlreadyLikedAsync(Profile profile, Post post)
+        {
+            return await _postLikes.AnyAsync(p => p.Profile == profile && p.Post == post);
         }
     }
 }
